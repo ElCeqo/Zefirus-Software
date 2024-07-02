@@ -112,8 +112,4 @@ class CommSystem:
                     self.write_register(0x12, 0xFF)
                     return data
 
-# Example usage
-comm_system = CommSystem(bus=0, device=0)
-comm_system.send_data([0x01, 0x02, 0x03])
-received_data = comm_system.listen()
-print(received_data)
+
