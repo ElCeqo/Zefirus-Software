@@ -18,6 +18,9 @@ In order to retrieve received data from FIFO the user must ensure that ValidHead
 RxTimeout interrupts in the status register RegIrqFlags are not asserted to ensure that packet reception has terminated
 successfully (i.e. no flags should be set).
 
+
+Use packet mode for communication. In packet mode, the module will automatically handle the preamble, sync word, CRC etc.
+
 '''
 
 
@@ -78,6 +81,35 @@ class CommSystem:
         # Power Amplifier setup (0x09)
         self.write_register(0x09, 0x7F) # Max power
 
+        # Setup transmission parameters RegPacketConfig1 (0x30) and RegPacketConfig2 (0x31)
+
+        '''
+        RegPacketConfig1 (0x30)
+        bit 7 Packet format: 0 = fixed length, 1 = variable length
+        bit 6-5 defines the DC-free encoding/decoding scheme: 00 = none, 01 = Manchester, 10 = Whitening, 11 = reserved
+        bit 4 CRC enable: 0 = disabled, 1 = enabled
+        bit 3 CRC auto clear: 0 = clear, 1 = no clear
+        bit 2-1 Address based filtering in Rx: 00 = none, 01 = node, 10 = node or broadcast
+        bit 0 Crc whitening type: 0 = CCITT, 1 = IBM
+
+        We want variable length packets, Whitening, CRC enabled, CRC auto clear, no address filtering, and CCITT whitening 11010000
+
+        RegPacketConfig2 (0x31)
+        bit 7 unused
+        bit 6 data mode: 0 = continuous, 1 = packet
+        bit 5 Io home control: 0 = disabled, 1 = enabled
+        bit 4 reserved
+        bit 3 beacon on in fixed mode
+        bit 2-0 PayloadLength[10:8] Packet length most significant bits
+
+        We want packet mode, Io home control disabled, and a payload length of (to be determined) 01000XXX
+        '''
+
+        self.write_register(0x30, 0xD0)
+        self.write_register(0x31, 0x40)
+
+
+
     def write_register(self, address, value):
         '''
         Write a value to a register.
@@ -113,7 +145,7 @@ class CommSystem:
         '''
         Listen for incoming data.
         '''
-        # Set the LoRa module to receive continuous mode
+        # Set to receive mode
         self.write_register(0x01, 0x85)
         
         while True:
