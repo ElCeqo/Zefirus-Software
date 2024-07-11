@@ -21,6 +21,10 @@ successfully (i.e. no flags should be set).
 
 Use packet mode for communication. In packet mode, the module will automatically handle the preamble, sync word, CRC etc.
 
+Ground station uses AX.25 protocol at data link layer. 
+
+
+Might need to wait for IRQ flags (0x3e ModeReady) to be set before doing anything else.
 '''
 
 
@@ -67,11 +71,9 @@ class CommSystem:
         Initialize the LoRa module with the desired settings.
         '''
         # Basic configuration for FSK mode
-        # first set the module to sleep mode
-        self.RegOpMode = 0x01
-        self.write_register(self.RegOpMode, 0x00)
-        # set the module to FSK mode, can be done only after the module is in sleep mode
+        # first set the module to sleep mode and FSK
         self.write_register(0x01, 0x00)
+
 
         # Carrier frequency registers setup (0x06, 0x07, 0x08)
         self.write_register(0x06, 0x6C) # Frequency (example: 915 MHz)
@@ -109,6 +111,19 @@ class CommSystem:
         self.write_register(0x31, 0x40)
 
 
+        '''
+        Set maximum payload length
+        '''
+        self.write_register(0x32, 0xFF)
+
+        
+        '''
+        After setting up the registers, we can set the module to standby mode
+        '''
+
+        self.write_register(0x01, 0x01)
+
+
 
     def write_register(self, address, value):
         '''
@@ -128,38 +143,37 @@ class CommSystem:
         Send data to the ground station.
         '''
         # Set the LoRa module to standby mode
-        self.write_register(0x01, 0x81)
+        self.write_register(0x01, 0x01)
         
         # Write data to the FIFO
         self.write_register(0x00, 0x00)
         for byte in data:
             self.spi.xfer2([0x00 | 0x80, byte])
         
-        # Set the length of the payload
-        self.write_register(0x22, len(data))
-        
         # Set the LoRa module to transmit mode
-        self.write_register(0x01, 0x83)
+        self.write_register(0x01, 0x03)
+
+        # Wait for the transmission to finish (irq flag set to 1)
+        while True:
+            if GPIO.input(self.irq_pin) == GPIO.HIGH:
+                irq_flags = self.read_register(0x3F)
+                if irq_flags & 0x08:
+                    return
 
     def listen(self):
         '''
         Listen for incoming data.
         '''
         # Set to receive mode
-        self.write_register(0x01, 0x85)
+        self.write_register(0x01, 0x05)
         
         while True:
             if GPIO.input(self.irq_pin) == GPIO.HIGH:
-                irq_flags = self.read_register(0x12)
-                if irq_flags & 0x40: # RX done
+                irq_flags = self.read_register(0x3F)
+                if irq_flags & 0x04: # RX done
                     # Read the received data
-                    self.write_register(0x0D, 0x00)
                     length = self.read_register(0x13)
-                    data = []
-                    for _ in range(length):
-                        data.append(self.read_register(0x00))
-                    # Clear IRQ flags
-                    self.write_register(0x12, 0xFF)
+                    data = self.read_register(0x00)
                     return data
 
 
