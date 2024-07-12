@@ -30,7 +30,7 @@ Might need to wait for IRQ flags (0x3e ModeReady) to be set before doing anythin
 
 class CommSystem:
     
-    def __init__(self, bus=0, device=0, irq_pin=25, reset_pin=7, cs_pin = 8, device_address=0x33, fifo_address=0x00):
+    def __init__(self, bus=0, device=0, irq_pin=25, reset_pin=7, device_address=0x33, fifo_address=0x00):
         '''
         Initialize the communication system by connecting to the RFM95/96/97/98(W) 
         Low Power Long Range Transceiver Module.
@@ -39,37 +39,20 @@ class CommSystem:
         self.device = device
         self.device_address = device_address
         self.fifo_address = fifo_address
-        self.cs_pin = cs_pin
 
         # Set up SPI
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
 
-        GPIO.cleanup()
-        
         # Set up GPIO for IRQ and RESET
-        self.irq_pin = irq_pin       
+        self.irq_pin = irq_pin            # still to be defined
         self.reset_pin = reset_pin
         GPIO.setmode(GPIO.BCM)
-        
-        try:
-            GPIO.setup(self.irq_pin, GPIO.IN)
-        except RuntimeWarning:
-            print(f"huh")
-        
-        try:
-            GPIO.setup(self.reset_pin, GPIO.OUT)
-        except RuntimeWarning:
-            print(f"ERRORE")
-
-        
-        GPIO.setup(self.cs_pin, GPIO.OUT)
-            
-
-        GPIO.output(self.cs_pin, GPIO.HIGH)
+        GPIO.setup(self.irq_pin, GPIO.IN)
+        GPIO.setup(self.reset_pin, GPIO.OUT)
 
         # Reset the LoRa module
-        #self.reset()
+        self.reset()
         
         # Initialize the LoRa module
         self.init_FSK()
@@ -78,9 +61,7 @@ class CommSystem:
         '''
         Perform a hardware reset on the LoRa module.
         '''
-
         GPIO.output(self.reset_pin, GPIO.LOW)
-
         time.sleep(0.01)
         GPIO.output(self.reset_pin, GPIO.HIGH)
         time.sleep(0.01)
@@ -92,6 +73,12 @@ class CommSystem:
         # Basic configuration for FSK mode
         # first set the module to sleep mode and FSK
         self.write_register(0x01, 0x00)
+
+
+        # Carrier frequency registers setup (0x06, 0x07, 0x08)
+        self.write_register(0x06, 0x6C) # Frequency (example: 915 MHz)
+        self.write_register(0x07, 0x80)
+        self.write_register(0x08, 0x00)
 
         # Power Amplifier setup (0x09)
         self.write_register(0x09, 0x7F) # Max power
@@ -129,13 +116,6 @@ class CommSystem:
         '''
         self.write_register(0x32, 0xFF)
 
-
-        '''
-        Set bitrate
-        '''
-        self.write_register(0x02, 0x68)  # MSB
-        self.write_register(0x03, 0x2B)  # LSB
-
         
         '''
         After setting up the registers, we can set the module to standby mode
@@ -149,17 +129,13 @@ class CommSystem:
         '''
         Write a value to a register.
         '''
-        GPIO.output(self.cs_pin, GPIO.LOW)
         self.spi.xfer2([address | 0x80, value])
-        GPIO.output(self.cs_pin, GPIO.HIGH)
 
     def read_register(self, address):
         '''
         Read a value from a register.
         '''
-        GPIO.output(self.cs_pin, GPIO.LOW)
         response = self.spi.xfer2([address & 0x7F, 0x00])
-        GPIO.output(self.cs_pin, GPIO.HIGH)
         return response[1]
 
     def send_data(self, data):
@@ -172,7 +148,7 @@ class CommSystem:
         # Write data to the FIFO
         self.write_register(0x00, 0x00)
         for byte in data:
-            self.write_register(0x00, byte)
+            self.spi.xfer2([0x00 | 0x80, byte])
         
         # Set the LoRa module to transmit mode
         self.write_register(0x01, 0x03)
@@ -197,14 +173,7 @@ class CommSystem:
                 if irq_flags & 0x04: # RX done
                     # Read the received data
                     length = self.read_register(0x13)
-                    data = []
-                    for _ in range(length):
-                        data.append(self.read_register(0x00))
+                    data = self.read_register(0x00)
                     return data
 
 
-
-
-if __name__ == '__main__':
-    comm = CommSystem()
-    comm.send_data([0x01, 0x02, 0x03, 0x04])
